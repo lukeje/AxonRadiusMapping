@@ -1,38 +1,36 @@
 function [r, beta] = getAxonRadius(delta, Delta, g, y, model)
-    %getAxonRadius Estimate the axon radius from multi-shell diffusion
-    % data, of which the lowest b-value is sufficiently high to suppress
-    % the extra-axonal compartment. For in vivo human MRI, we recommend
-    % a minimum b = 6000 s/mm2. 
+    %getAxonRadius Estimate axon radius from multi-shell diffusion data
+    %
+    % The lowest b-value must be sufficiently high to suppress the extra-axonal
+    % compartment. For in vivo human MRI, we recommend a minimum b = 6000 s/mm2.
     %
     %     [r, beta] = getAxonRadius(delta, Delta, g, y, model)
     %
     % output:
     %     - r:    effective MR radius
     %     - beta: the slope of the signal scaling as a function
-    %             of 1/sqrt. ~ f/sqrt(Da)
+    %             of 1/sqrt(b). ~ f/sqrt(Da)
     %
     % input:
     %     - delta: gradient duration [ms]
     %     - Delta: gradient separation [ms]
     %     - g:     gradient strength [mT/m]
-    %     - y:     powder-averaged diffusion-weighted signal,
-    %              normalized to y(b=0) = 1. If the dot compartment
-    %              cannot be ignored, it needs to be subtracted from 
-    %              y prior to fitting.  
-    %     - model: "Van Gelderen", "Neumann" (the latter only applies 
-    %              in long pulse regimes, but typically applies), or
-    %              "Neumann2ndOrder" (second order cumulant expansion
-    %              of the Neumann model valid for stronger gradient
-    %              strengths)
+    %     - y:     powder-averaged diffusion-weighted signal, normalized to
+    %              y(b=0) = 1. If the dot compartment cannot be ignored, it
+    %              needs to be subtracted from y prior to fitting.
+    %     - model: "VanGelderen", "Neumann" (the latter only applies in long
+    %              pulse regimes, but typically applies), or "Neumann2ndOrder"
+    %              (second order cumulant expansion of the Neumann model valid
+    %              for stronger gradient strengths)
     %
-    %  Author: Jelle Veraart (jelle.veraart@nyulangone.org)
-    %  Copyright (c) 2019 New York University
+    % Author: Jelle Veraart (jelle.veraart@nyulangone.org)
+    % Copyright (c) 2019 New York University
 
     if ~exist('model', 'var')
         model = 'VanGelderen';
     end
 
-    options = optimset('lsqnonlin'); 
+    options = optimset('lsqnonlin');
     options = optimset(options,'Jacobian','on','TolFun',1e-12,'TolX',1e-12,'MaxIter',10000,'Display','off');
 
     gyroMagnRatio = 267.513e-6;
@@ -43,13 +41,13 @@ function [r, beta] = getAxonRadius(delta, Delta, g, y, model)
         case {'Neumann','Neumann2ndOrder'}
             pars = lsqnonlin(@(x)residuals(x, [delta(:), Delta(:), g(:)], y, model),start,[0 0],[sqrt(4*pi) 5],options);
         case 'VanGelderen'
-            % Random initial guess seems to work well for Neumann, but not for Van
-            % Gelderen model, so we use the Neumann results as initial guesses for
-            % the Van Gelderen model
+            % Random initial guess seems to work well for Neumann, but not for
+            % Van Gelderen model, so we use the Neumann result as initial guess
+            % for the Van Gelderen model
             pars = lsqnonlin(@(x)residuals(x, [delta(:), Delta(:), g(:)], y, 'Neumann'),start,[0 0],[sqrt(4*pi) 5],options);
             pars = lsqnonlin(@(x)residuals(x, [delta(:), Delta(:), g(:)], y, 'VanGelderen'),pars,[0 0],[sqrt(4*pi) 5],options);
         otherwise
-            error('Unknown model "%s". Allowed models are "Neumann", "Neumann2ndOrder", or "VanGelderen"', model)
+            error('Unknown model "%s". Allowed models are "Neumann", "VanGelderen", or "Neumann2ndOrder"', model)
     end
     beta = pars(1);
     r = pars(2);
@@ -61,7 +59,7 @@ function [E, J] = residuals(pars, X, y, model)
     Delta = X(:, 2);
     g = X(:, 3);
 
-    [shat, dshat] = AxonDiameterFWD(delta, Delta, g, pars, model); 
+    [shat, dshat] = AxonDiameterFWD(delta, Delta, g, pars, model);
     E = shat(:) - y(:);
     J = dshat;
 
@@ -78,7 +76,7 @@ function [s, ds] = AxonDiameterFWD(delta, Delta, g, pars, model)
     % compute b-values using Stejskal-Tanner sequence
     q = g*gyroMagnRatio;
     b = (q.*delta).^2.*(Delta - delta/3);
- 
+
     % Forward model
     switch model
         case 'Neumann'
@@ -87,10 +85,10 @@ function [s, ds] = AxonDiameterFWD(delta, Delta, g, pars, model)
             ds_dr = s .* -(7/12)*q.^2.*delta*r^3/D0;
 
         case 'Neumann2ndOrder'
-            logs1 = -(7/48)*q.^2.*delta*r^4/D0;
-            ds_dbeta = exp(logs1 -0.5*logs1.^2) ./ sqrt(b);
+            c1 = -(7/48)*q.^2.*delta*r^4/D0; % first cumulant
+            ds_dbeta = exp(c1 -0.5*c1.^2) ./ sqrt(b);
             s = beta * ds_dbeta;
-            ds_dr = s .* -(7/12)*q.^2.*delta*r^3.*(1 - logs1)/D0;
+            ds_dr = s .* -(7/12)*q.^2.*delta*r^3.*(1 - c1)/D0;
 
         case 'VanGelderen'
             [Svg, dSvg] = vg(delta, Delta, q, r, D0);
@@ -107,12 +105,13 @@ function [s, ds] = vg(delta, Delta, q, r, D0)
 
     td = r^2/D0;
     bardelta = delta/td; dbardelta = -2*delta*D0 / r^3;
-     barDelta = Delta/td; dbarDelta = -2*Delta*D0 / r^3;
+    barDelta = Delta/td; dbarDelta = -2*Delta*D0 / r^3;
 
     % tabulated solutions of d J_1(x) / dx = 0
     N=15; 
-    br = [ 1.8412  5.3314  8.5363 11.7060 14.8636 18.0155 21.1644 24.3113 27.4571 30.6019 ...
-            33.7462 36.8900 40.0334 43.1766 46.3196 49.4624 52.6050 55.7476 58.8900 62.0323];
+    br = [ 1.8412  5.3314  8.5363 11.7060 14.8636 18.0155 21.1644 24.3113 ...
+          27.4571 30.6019 33.7462 36.8900 40.0334 43.1766 46.3196 49.4624 ...
+          52.6050 55.7476 58.8900 62.0323];
 
     s = 0; ds = 0;
     for k=1:N
